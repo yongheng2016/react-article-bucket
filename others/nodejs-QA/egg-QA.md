@@ -34,7 +34,7 @@ module.exports = function*() {
   update(this);
 };
 ```
-总之，在egg中如果要访问到数据库，必须通过`yield`来完成，而通过外部的processData函数直接拿到scope这种方式是不行的，后续再对这一部分内容进行深入研究。
+总之，在egg中如果要访问到数据库，必须通过`yield`来完成，而通过外部的processData函数直接拿到scope这种方式是不行的，后续再对这一部分内容进行深入研究。包括重新开启一个Worker进程，传入scope这种方式操作数据库都是不支持的!!!
 
 #### 3.egg无法使用aync和await
 原因是: egg-mysql包装了`ali-rds`后者不支持promise所以不能使用async/await。但是给出了解决方法,即用co包装:
@@ -133,6 +133,89 @@ ctx.is('html'); // => false
 ```
 如果要获取node中的request对象可以通过*ctx.req*，而获取node中的response可以获取*ctx.res*。但是他们和Koa本身的request对象和reponse对象是不一样的，后者是通过"ctx.request"和"ctx.response"来获取!
 
+
+#### 7.egg中如何配置数据库连接池信息
+你必须知道[egg-mysql](https://github.com/eggjs/egg-mysql)下直接封装了[ali-rds](https://github.com/ali-sdk/ali-rds),而后者直接封装了[mysql](https://github.com/mysqljs/mysql#pool-options)。假如你的egg的mysql配置内容如下:
+```js
+exports.mysql = {
+    // 数据库信息配置
+    client: {
+      host: 'tddl.daily2.alibaba.net',
+      port: 3306,
+      user: 'POLY_APP',
+      // connectionLimit : 10,
+      //其中connectionLimit是_ali-rds@3.0.1@ali-rds默认的值，默认为5
+      // acquireTimeout:20000,
+      password: '123456',
+      database: 'POLY_APP',
+      // 是否启用加密密码
+      encryptPassword: false,
+    },
+    // 是否加载到 app 上，默认开启
+    app: true,
+    // 是否加载到 agent 上，默认关闭
+    agent: false,
+  };
+```
+很可能会抛出如下的超时错误:
+<pre>
+  2017-11-15 08:58:25,029 ERROR 189112 nodejs.PROTOCOL_SEQUENCE_TIMEOUTError: [egg-schedule] egg-schedule:/home/admin/polymerization/target/polymerization/app/sched
+ule/grob2DB.js excute error. Handshake inactivity timeout
+    at Handshake.<anonymous> (/home/admin/polymerization/target/polymerization/node_modules/_mysql@2.15.0@mysql/lib/protocol/Protocol.js:164:17)
+    at emitNone (events.js:67:13)
+    at Handshake.emit (events.js:166:7)
+    at Handshake._onTimeout (/home/admin/polymerization/target/polymerization/node_modules/_mysql@2.15.0@mysql/lib/protocol/sequences/Sequence.js:129:8)
+    at Timer.listOnTimeout (timers.js:96:15)
+    --------------------
+    at Protocol._enqueue (/home/admin/polymerization/target/polymerization/node_modules/_mysql@2.15.0@mysql/lib/protocol/Protocol.js:145:48)
+    at Protocol.handshake (/home/admin/polymerization/target/polymerization/node_modules/_mysql@2.15.0@mysql/lib/protocol/Protocol.js:52:23)
+    at PoolConnection.connect (/home/admin/polymerization/target/polymerization/node_modules/_mysql@2.15.0@mysql/lib/Connection.js:130:18)
+    at Pool.getConnection (/home/admin/polymerization/target/polymerization/node_modules/_mysql@2.15.0@mysql/lib/Pool.js:48:16)
+    at /home/admin/polymerization/target/polymerization/node_modules/_pify@2.3.0@pify/index.js:29:7
+    at Pool.<anonymous> (/home/admin/polymerization/target/polymerization/node_modules/_pify@2.3.0@pify/index.js:12:10)
+    at Pool.ret [as getConnection] (/home/admin/polymerization/target/polymerization/node_modules/_pify@2.3.0@pify/index.js:56:34)
+    at Pool.releaseConnection (/home/admin/polymerization/target/polymerization/node_modules/_mysql@2.15.0@mysql/lib/Pool.js:157:10)
+    at Pool._removeConnection (/home/admin/polymerization/target/polymerization/node_modules/_mysql@2.15.0@mysql/lib/Pool.js:277:8)
+    at Pool._purgeConnection (/home/admin/polymerization/target/polymerization/node_modules/_mysql@2.15.0@mysql/lib/Pool.js:258:8)
+</pre>
+
+此时添加上面的connectionLimit和acquireTimeout参数就可以了(其实只要添加后者就行)。此时如果在[mysql](https://github.com/mysqljs/mysql#pool-options)的Pool.js中打印创建连接池的配置参数将会得到如下的内容:
+```js
+{
+    "config": {
+        "acquireTimeout": 20000,
+        //https://github.com/mysqljs/mysql#pool-options
+        //这里是从连接池获取一个连接超时时间，和connectTimeout有区别，因为获取一个连接不代表会真实使用它
+        "connectionConfig": {
+            "host": "tddl.daily2.alibaba.net",
+            "port": 3306,
+            "user": "POLY_APP",
+            "password": "123456",
+            "database": "POLY_APP",
+            "connectTimeout": 20000,
+            //获取一个可以使用的连接的超时设置
+            "insecureAuth": false,
+            "supportBigNumbers": false,
+            "bigNumberStrings": false,
+            "dateStrings": false,
+            "trace": true,
+            "stringifyObjects": false,
+            "timezone": "local",
+            "flags": "",
+            "ssl": false,
+            "multipleStatements": false,
+            "typeCast": true,
+            "maxPacketSize": 0,
+            "charsetNumber": 33,
+            "clientFlags": 455631
+        },
+        "waitForConnections": true,
+        "connectionLimit": 10,
+        // 其中connectionLimit是_ali-rds@3.0.1@ali-rds默认的值，默认为5
+        "queueLimit": 0
+    }
+}
+```
 
 参考资料:
 
