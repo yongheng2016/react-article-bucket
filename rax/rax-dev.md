@@ -282,6 +282,96 @@ reloadCurrentPage = () => {
  }
 ```
 
+### 16.rax在ipone中自动刷新难题
+```js
+const ConcatSource = require("webpack-sources").ConcatSource;
+const MemoryFileSystem = require("memory-fs");
+const util = require("util");
+let __nextCompilationHash = "罄天";
+function CompilationHashChangeDetect(options) {}
+CompilationHashChangeDetect.prototype.apply = function(compiler) {
+  if (!compiler.hashNext) {
+    compiler.__hashNext = {};
+  }
+  compiler.plugin("compilation", compilation => {
+    compilation.plugin("optimize-chunk-assets", (chunks, callback) => {
+      // hash是否已经变化了
+      let __hsHashChanged = false;
+      for (let c = 0, len = chunks.length; c < len; c++) {
+        if (
+          !compiler.__hashNext[chunks[c].name] ||
+          compiler.__hashNext[chunks[c].name] != chunks[c].hash
+        ) {
+          __hsHashChanged = true;
+        }
+      }
+      Object.keys(compilation.namedChunks).forEach(name => {
+        compiler.__hashNext[name] = compilation.namedChunks[name].hash;
+      });
+      const __refreshCodeInjected = `${__hsHashChanged
+        ? 
+          `
+          //  var storage = weex.requireModule('storage');
+          // function once(fn) {
+          //   return function() {
+          //     if (fn === null) return;
+          //     var callFn = fn;
+          //     fn = null;
+          //     storage.setItem('hsAutoRefreshed', "${compilation.hash}", event => {
+          //     });
+          //     callFn.apply(this, arguments);
+          //   };
+          // };
+          // storage.getItem('hsAutoRefreshed', event => {
+          //   var isEqual = event.data=="${compilation.hash}";
+          //   if(!isEqual){
+          //     storage.setItem('hsAutoRefreshed', "${compilation.hash}", event => {
+          //       location.reload(true);
+          //     });
+          //   }else{
+          //     storage.setItem('hsAutoRefreshed', "${compilation.hash}", event => {
+          //     });
+          //   }
+          // });
+          setInterval(function(){
+            location.reload(true);
+          },5000);
+        `
+        : ""}`;
+      // 需要在入口文件中添加它entry为true
+      // 两次compilation.hash的比较
+      // 判断是否是rax，不是rax容器不添加。
+      // 问题:为什么有两次执行optimize-chunk-assets钩子函数呢-启动了childCompiler
+      // 问题:两次ChildCompiler会导致这个插件分别被执行一次，导致分别产生一个hash,控制台可以看出
+      // 问题:.weex后缀的文件才刷新，否则def默认支持web刷新
+      __nextCompilationHash = chunks
+        .filter(chunk => {
+          return chunk.entry;
+          // 不关心是否是initial chunk
+        })
+        .forEach(chunk => {
+          chunk.files.forEach(
+            file =>
+              (compilation.assets[file] = new ConcatSource(
+                __refreshCodeInjected,
+                "\n",
+                compilation.assets[file]
+              ))
+          );
+        });
+      callback();
+    });
+  });
+};
+module.exports = CompilationHashChangeDetect;
+```
+上面并没有实现改动后才刷新，而是使用了一个setInterval完成，这是因为更新后的代码没法实时同步到client端!我一直有一个疑问为啥就不行呢？我的服务端明显可以监听到chunk的hash是否已经变化，而且HMR也可以把检查更新的代码打包到最后的js中，难道因为app容器仅仅加载了一个js，而不是一个html页面，所以liveReload没法启作用,sockjs也是同样的道理？
+
+
+
+
+
+
 
 
 参考资料:

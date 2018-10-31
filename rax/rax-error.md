@@ -25,3 +25,9 @@ ERROR in ./rax/components/universalcallup.js
    const { interactionType, displayType, prize } = this.state;
    const { interactionType } = this.props;
 ```
+
+### 2."XErrorDomain"错误302
+尝试重启charles，重启机器;连接了VPN的时候下面的内网看是否能连接:
+![](./images/net.png)
+
+主要看charles是否能抓取到m.baidu.com，如果没有一般就是这个情况。
